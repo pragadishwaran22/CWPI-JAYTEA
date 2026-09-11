@@ -1,0 +1,22 @@
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Streamlit private configuration
+.streamlit/secrets.toml
+
+# Generated reports and uploaded workbooks
+outputs/
+upload/
+*.xlsx
+*.xls
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
