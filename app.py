@@ -21,6 +21,13 @@ st.markdown(
     [data-testid="stSidebar"] { background: #102a43; }
     [data-testid="stSidebar"] * { color: #f8fafc; }
     [data-testid="stSidebar"] input { color: #102a43; }
+    [data-testid="stSidebar"] [data-testid="stDateInput"] [role="group"],
+    [data-testid="stSidebar"] [data-testid="stDateInput"] [role="group"] *,
+    [data-testid="stSidebar"] [data-testid="stDateInput"] [role="spinbutton"] {
+        color: #102a43 !important;
+        -webkit-text-fill-color: #102a43 !important;
+        opacity: 1 !important;
+    }
     .hero { padding: 28px 32px; border-radius: 20px; background: linear-gradient(125deg, #12355b 0%, #176b87 62%, #2a9d8f 100%); color: white; box-shadow: 0 14px 35px rgba(18,53,91,.18); margin-bottom: 22px; }
     .hero h1 { margin: 0 0 8px; font-size: 2.15rem; letter-spacing: -.02em; }
     .hero p { margin: 0; opacity: .88; font-size: 1.02rem; }
