@@ -8,6 +8,7 @@ from report_engine import (
     create_contractor_excel_report,
     create_excel_report,
 )
+from version import APP_VERSION
 
 
 st.set_page_config(page_title="MJIPL Printing Issue Report", page_icon="📦", layout="wide", initial_sidebar_state="expanded")
@@ -32,10 +33,31 @@ st.markdown(
     div[data-testid="stMetric"] { background: white; border: 1px solid #e3e8ef; padding: 15px 18px; border-radius: 15px; box-shadow: 0 4px 14px rgba(15,23,42,.04); }
     div[data-testid="stFileUploader"] { background: white; border-radius: 14px; padding: 4px 12px; }
     .stButton > button, .stDownloadButton > button { border-radius: 11px; font-weight: 700; }
+    .app-version-badge {
+        position: fixed;
+        top: .48rem;
+        right: 7.4rem;
+        z-index: 999999;
+        padding: .28rem .72rem;
+        border: 1px solid #b8c7d9;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, .96);
+        color: #17365d;
+        font-size: .78rem;
+        font-weight: 700;
+        letter-spacing: .02em;
+        line-height: 1.25;
+        box-shadow: 0 2px 8px rgba(15, 23, 42, .08);
+    }
+    @media (max-width: 640px) {
+        .app-version-badge { right: 5rem; font-size: .72rem; }
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
+
+st.markdown(f'<div class="app-version-badge">Version {APP_VERSION}</div>', unsafe_allow_html=True)
 
 st.markdown(
     """

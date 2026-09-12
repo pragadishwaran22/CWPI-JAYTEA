@@ -62,3 +62,7 @@ Total KG = Rounded Shift A KG + Rounded Shift B KG
 ```
 
 If Roll Weight and Core/Tare are both explicitly zero, Core/Tare KG is treated as zero and the app shows a warning. Blank weights block report generation.
+
+## Version
+
+The version badge beside the Streamlit toolbar is controlled by `APP_VERSION` in `version.py`. Update this value whenever a feature release should receive a new version so the local app and the GitHub-backed Streamlit Cloud app can be compared easily.
