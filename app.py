@@ -101,11 +101,20 @@ with generate_tab:
                     st.write(f"• {warning}")
 
         stats = result.source_stats
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Report rows", f"{stats['Output rows']:,}")
-        m2.metric("Total requested PCS", f"{stats['Total PCS']:,.2f}")
-        m3.metric("Shift A issue KG", f"{stats['Shift A KG']:,.0f}")
-        m4.metric("Shift B issue KG", f"{stats['Shift B KG']:,.0f}")
+        with st.container(horizontal=True, horizontal_alignment="center"):
+            st.metric("Report rows", f"{stats['Output rows']:,}", border=True)
+
+        shift_a_summary, shift_b_summary = st.columns(2, gap="large", border=True)
+        with shift_a_summary:
+            st.markdown("#### Shift A issue KG")
+            st.metric("Total issue KG", f"{stats['Shift A KG']:,.0f}")
+            st.metric("Total requested TAG (KG)", f"{stats['Shift A TAG KG']:,.0f}")
+            st.metric("Total requested ENV (KG)", f"{stats['Shift A ENV KG']:,.0f}")
+        with shift_b_summary:
+            st.markdown("#### Shift B issue KG")
+            st.metric("Total issue KG", f"{stats['Shift B KG']:,.0f}")
+            st.metric("Total requested TAG (KG)", f"{stats['Shift B TAG KG']:,.0f}")
+            st.metric("Total requested ENV (KG)", f"{stats['Shift B ENV KG']:,.0f}")
 
         overall_display = result.report.copy()
         overall_display["Allowance (%)"] = overall_display["Allowance"] * 100

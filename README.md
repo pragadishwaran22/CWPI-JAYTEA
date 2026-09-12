@@ -46,6 +46,8 @@ Upload:
 
 Choose the report date and allowance, then click **Validate and generate report**. Serious mapping or weight errors block the download. Warnings remain visible for review. Rows whose Request Qty is zero in both shifts are omitted because no material needs to be issued.
 
+The summary separates requested KG within each shift by Printing Item Name prefix: names beginning with `TAG` contribute to that shift's **Total requested TAG (KG)**, and names beginning with `ENV` contribute to that shift's **Total requested ENV (KG)**.
+
 Daily Auto Material Slip Item IDs and permanent-master item codes come from different numbering systems. The application therefore matches the exact normalized Printing Item Name. It never silently accepts a fuzzy match. Both the daily ID and master code are included in the output for auditing.
 
 ## Calculation

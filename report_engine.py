@@ -315,6 +315,7 @@ def build_report(master_source: FileInput, shift_a_source: FileInput, shift_b_so
     report = report[output_columns].sort_values(
         ["Contractor Name", "Printing Item Name"], kind="stable"
     ).reset_index(drop=True)
+    item_prefixes = report["Printing Item Name"].fillna("").astype(str).str.strip().str.upper()
     stats = {
         "Shift A source rows": len(shift_a.rows),
         "Shift B source rows": len(shift_b.rows),
@@ -323,7 +324,11 @@ def build_report(master_source: FileInput, shift_a_source: FileInput, shift_b_so
         "Shift B date": shift_b.detected_date,
         "Total PCS": float(report["Total PCS"].sum()),
         "Shift A KG": float(report["Shift A KG"].sum()),
+        "Shift A TAG KG": float(report.loc[item_prefixes.str.startswith("TAG"), "Shift A KG"].sum()),
+        "Shift A ENV KG": float(report.loc[item_prefixes.str.startswith("ENV"), "Shift A KG"].sum()),
         "Shift B KG": float(report["Shift B KG"].sum()),
+        "Shift B TAG KG": float(report.loc[item_prefixes.str.startswith("TAG"), "Shift B KG"].sum()),
+        "Shift B ENV KG": float(report.loc[item_prefixes.str.startswith("ENV"), "Shift B KG"].sum()),
         "Total KG": float(report["Total KG"].sum()),
     }
     return ReportResult(report, list(dict.fromkeys(errors)), list(dict.fromkeys(warnings)), stats)
