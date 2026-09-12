@@ -1,9 +1,25 @@
 [theme]
-primaryColor = "#1c8c82"
-backgroundColor = "#f5f7fb"
-secondaryBackgroundColor = "#ffffff"
-textColor = "#17324d"
-font = "sans serif"
+base = "dark"
+primaryColor = "#D7A919"
+backgroundColor = "#08090D"
+secondaryBackgroundColor = "#17191F"
+textColor = "#F7F2E6"
+linkColor = "#F1C84B"
+borderColor = "#4B4537"
+dataframeBorderColor = "#4B4537"
+dataframeHeaderBackgroundColor = "#202126"
+showWidgetBorder = true
+showSidebarBorder = true
+baseRadius = "large"
+buttonRadius = "full"
+font = "sans-serif"
+
+[theme.sidebar]
+backgroundColor = "#0C0D11"
+secondaryBackgroundColor = "#18191E"
+textColor = "#F7F2E6"
+primaryColor = "#D7A919"
+borderColor = "#3E392E"
 
 [server]
 maxUploadSize = 200
