@@ -509,58 +509,58 @@ def _escape_html(value: object) -> str:
 # CSS font-size + padding used below always renders SHORTER than the budgeted
 # value — the budget is intentionally conservative so content never overflows a
 # simulated page (which would break the 1 preview page = 1 printed page guarantee).
+# Values are kept close to the real rendered size (rather than padded generously)
+# so pages pack tightly instead of leaving unused space at the bottom.
 _PAGE_HEIGHT_MM = 297
 _PAGE_WIDTH_MM = 210
 _PAGE_PADDING_MM = 14
 _CONTENT_HEIGHT_MM = _PAGE_HEIGHT_MM - 2 * _PAGE_PADDING_MM
 _CONTENT_WIDTH_MM = _PAGE_WIDTH_MM - 2 * _PAGE_PADDING_MM
-_SAFETY_BUFFER_MM = 10
+_SAFETY_BUFFER_MM = 4
 _USABLE_HEIGHT_MM = _CONTENT_HEIGHT_MM - _SAFETY_BUFFER_MM
 
-_TITLE_BLOCK_MM = 12
-_RUNNING_HEADER_MM = 8
-_CONTRACTOR_HEADER_MM = 8
-_COLUMN_HEADER_MM = 7
-_DATA_ROW_MM = 6
-_TOTAL_ROW_MM = 7
+# These are calibrated against actual browser-measured row heights (via
+# getBoundingClientRect on a rendered sample) rather than hand estimates,
+# each with a small ~0.3-0.5mm buffer for cross-browser/printer variance.
+_TITLE_BLOCK_MM = 10.9
+_RUNNING_HEADER_MM = 7.3
+_CONTRACTOR_HEADER_MM = 7.2
+# "Issued in PCS" / "Issued in KG" wrap to 2 lines within their narrow column,
+# so this budget must cover 2 lines, not 1 (measured actual ~8.8mm).
+_COLUMN_HEADER_MM = 9.1
+_TOTAL_ROW_MM = 5.3
 _SPACER_MM = 6
 
-# Column widths adapt to the longest value actually present, so full names
-# stay on one line (the row-height budget above assumes single-line rows).
-_CHAR_WIDTH_MM = 1.9
-_CELL_PADDING_MM = 6.0
-_MIN_ITEM_NAME_MM = 45.0
-_MAX_ITEM_NAME_MM = 110.0
-_MIN_MACHINE_NAME_MM = 28.0
-_MAX_MACHINE_NAME_MM = 70.0
-_MIN_OTHER_COLUMN_MM = 12.0
+# Comfortable fixed column widths (not content-dependent, since wrapping now
+# absorbs long names instead of requiring a wider single-line column).
+_ITEM_NAME_COL_MM = 58.0
+_MACHINE_NAME_COL_MM = 34.0
 _OTHER_COLUMN_COUNT = 5
 
+# A data row only needs its taller (2-line) budget when the item/machine name
+# actually overflows its column at ~1.9mm per character. Most rows are single
+# line, so scoring each row individually (still 100% server-computed, not
+# browser-measured) avoids reserving 2-line space for every row on the page.
+# Calibrated against actual canvas.measureText() widths at 10.5px Arial:
+# item names are mostly uppercase (~1.6-1.73mm/char observed), machine names are
+# mixed-case (~1.37-1.44mm/char observed). Each factor sits just above the
+# observed maximum so the wrap/no-wrap call matches real rendering closely
+# instead of over-predicting wraps (which was wasting page space).
+_ITEM_CHAR_WIDTH_MM = 1.8
+_MACHINE_CHAR_WIDTH_MM = 1.5
+_TD_HPADDING_MM = 3.2
+_DATA_ROW_SINGLE_MM = 5.6
+_DATA_ROW_DOUBLE_MM = 8.9
+_ITEM_NAME_CHAR_CAPACITY = (_ITEM_NAME_COL_MM - _TD_HPADDING_MM) / _ITEM_CHAR_WIDTH_MM
+_MACHINE_NAME_CHAR_CAPACITY = (_MACHINE_NAME_COL_MM - _TD_HPADDING_MM) / _MACHINE_CHAR_WIDTH_MM
+_OTHER_COLUMN_MM = (_CONTENT_WIDTH_MM - _ITEM_NAME_COL_MM - _MACHINE_NAME_COL_MM) / _OTHER_COLUMN_COUNT
 
-def _text_column_width(values: list[str], min_mm: float, max_mm: float) -> float:
-    longest = max((len(v) for v in values), default=0)
-    width = longest * _CHAR_WIDTH_MM + _CELL_PADDING_MM
-    return min(max_mm, max(min_mm, width))
 
-
-def _compute_column_widths(result: ReportResult) -> tuple[float, float, float]:
-    item_names = result.report["Printing Item Name"].dropna().astype(str).tolist()
-    machine_names = result.report["Machine Line Name"].dropna().astype(str).tolist()
-
-    item_mm = _text_column_width(item_names, _MIN_ITEM_NAME_MM, _MAX_ITEM_NAME_MM)
-    machine_mm = _text_column_width(machine_names, _MIN_MACHINE_NAME_MM, _MAX_MACHINE_NAME_MM)
-
-    other_total_floor = _MIN_OTHER_COLUMN_MM * _OTHER_COLUMN_COUNT
-    remaining = _CONTENT_WIDTH_MM - item_mm - machine_mm
-    if remaining < other_total_floor:
-        deficit = other_total_floor - remaining
-        flex_total = item_mm + machine_mm
-        item_mm -= deficit * (item_mm / flex_total)
-        machine_mm -= deficit * (machine_mm / flex_total)
-        remaining = other_total_floor
-
-    other_mm = remaining / _OTHER_COLUMN_COUNT
-    return item_mm, machine_mm, other_mm
+def _row_height_mm(item_name: object, machine_name: object) -> float:
+    item_len = len("" if pd.isna(item_name) else str(item_name))
+    machine_len = len("" if pd.isna(machine_name) else str(machine_name))
+    needs_wrap = item_len > _ITEM_NAME_CHAR_CAPACITY or machine_len > _MACHINE_NAME_CHAR_CAPACITY
+    return _DATA_ROW_DOUBLE_MM if needs_wrap else _DATA_ROW_SINGLE_MM
 
 
 def build_contractor_print_html(result: ReportResult, report_date: date | None = None) -> str:
@@ -581,10 +581,8 @@ def build_contractor_print_html(result: ReportResult, report_date: date | None =
         contractor_data.append((contractor, rows, totals))
 
     pages = _paginate_contractors(contractor_data)
-    item_mm, machine_mm, other_mm = _compute_column_widths(result)
     pages_html = "".join(
-        _render_page(blocks, index, len(pages), report_date, item_mm, machine_mm, other_mm)
-        for index, blocks in enumerate(pages)
+        _render_page(blocks, index, len(pages), report_date) for index, blocks in enumerate(pages)
     )
 
     return f"""<!DOCTYPE html>
@@ -626,8 +624,13 @@ def build_contractor_print_html(result: ReportResult, report_date: date | None =
   td {{
     border: 1px solid #9fb2c8; padding: 3px 6px; font-size: 10.5px; text-align: right;
     color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    vertical-align: middle;
   }}
   td:nth-child(1), td:nth-child(2) {{ text-align: left; }}
+  td.wrap-cell {{
+    white-space: normal; word-break: break-word; line-height: 1.2;
+    max-height: 2.4em; overflow: hidden;
+  }}
   tr.total-row td {{ font-weight: bold; background: #D9EAD3; color: #14532D; border-color: #4b7a57; }}
   tr.spacer-row td {{ border: none; padding: 0; height: {_SPACER_MM}mm; }}
   .page-number {{
@@ -680,7 +683,7 @@ def _paginate_contractors(
     for contractor, rows, totals in contractor_data:
         capacity = usable_height()
         section_head_height = _CONTRACTOR_HEADER_MM + _COLUMN_HEADER_MM
-        first_row_height = _DATA_ROW_MM if rows else _TOTAL_ROW_MM
+        first_row_height = _row_height_mm(rows[0][0], rows[0][1]) if rows else _TOTAL_ROW_MM
         if current and current_height + section_head_height + first_row_height > capacity:
             start_new_page()
             capacity = usable_height()
@@ -690,14 +693,15 @@ def _paginate_contractors(
         current_height += section_head_height
 
         for row in rows:
-            if current_height + _DATA_ROW_MM > capacity:
+            row_height = _row_height_mm(row[0], row[1])
+            if current_height + row_height > capacity:
                 start_new_page()
                 capacity = usable_height()
                 current.append(("contractor_header", contractor, True))
                 current.append(("column_header",))
                 current_height += section_head_height
             current.append(("data_row", row))
-            current_height += _DATA_ROW_MM
+            current_height += row_height
 
         if current_height + _TOTAL_ROW_MM > capacity:
             start_new_page()
@@ -717,15 +721,10 @@ def _paginate_contractors(
     return pages or [[]]
 
 
-def _render_page(
-    blocks: list[tuple],
-    index: int,
-    total_pages: int,
-    report_date: date,
-    item_mm: float,
-    machine_mm: float,
-    other_mm: float,
-) -> str:
+_WRAP_COLUMNS = {"Printing Item Name", "Machine Line Name"}
+
+
+def _render_page(blocks: list[tuple], index: int, total_pages: int, report_date: date) -> str:
     header_html = (
         f'<div class="page-title">CONTRACTOR-WISE PRINTING MATERIAL ISSUE REPORT &mdash; {report_date:%d-%m-%Y}</div>'
         if index == 0
@@ -754,7 +753,8 @@ def _render_page(
                     text = "" if pd.isna(value) else f"{value:,.0f}"
                 else:
                     text = _escape_html(value)
-                cells.append(f"<td>{text}</td>")
+                css_class = " class='wrap-cell'" if column in _WRAP_COLUMNS else ""
+                cells.append(f"<td{css_class}>{text}</td>")
             rows_html.append("<tr>" + "".join(cells) + "</tr>")
         elif kind == "total_row":
             _, totals = block
@@ -772,10 +772,10 @@ def _render_page(
 
     colgroup = (
         "<colgroup>"
-        f"<col style='width:{item_mm:.1f}mm'><col style='width:{machine_mm:.1f}mm'>"
-        f"<col style='width:{other_mm:.1f}mm'><col style='width:{other_mm:.1f}mm'>"
-        f"<col style='width:{other_mm:.1f}mm'><col style='width:{other_mm:.1f}mm'>"
-        f"<col style='width:{other_mm:.1f}mm'>"
+        f"<col style='width:{_ITEM_NAME_COL_MM:.1f}mm'><col style='width:{_MACHINE_NAME_COL_MM:.1f}mm'>"
+        f"<col style='width:{_OTHER_COLUMN_MM:.1f}mm'><col style='width:{_OTHER_COLUMN_MM:.1f}mm'>"
+        f"<col style='width:{_OTHER_COLUMN_MM:.1f}mm'><col style='width:{_OTHER_COLUMN_MM:.1f}mm'>"
+        f"<col style='width:{_OTHER_COLUMN_MM:.1f}mm'>"
         "</colgroup>"
     )
 
