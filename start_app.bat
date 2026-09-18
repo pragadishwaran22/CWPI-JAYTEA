@@ -26,9 +26,9 @@ echo [2/3] Installing or checking required packages...
 if errorlevel 1 goto :failed
 
 echo [3/3] Starting the application...
-echo The browser will open at http://localhost:8501
+echo The browser will open at http://127.0.0.1:8501
 echo Keep this window open while using the application.
-start "" powershell.exe -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 4; Start-Process 'http://localhost:8501'"
+start "" powershell.exe -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 4; Start-Process 'http://127.0.0.1:8501'"
 ".venv\Scripts\python.exe" -m streamlit run app.py --server.headless true --server.address 127.0.0.1 --server.port 8501 --browser.gatherUsageStats false
 if errorlevel 1 goto :failed
 exit /b 0

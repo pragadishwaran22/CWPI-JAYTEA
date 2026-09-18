@@ -482,3 +482,245 @@ def create_contractor_excel_report(
     output = BytesIO()
     wb.save(output)
     return output.getvalue()
+
+
+PRINT_COLUMNS = [
+    "Printing Item Name",
+    "Machine Line Name",
+    "Shift A KG",
+    "Shift B KG",
+    "Total KG",
+    "Issued in PCS",
+    "Issued in KG",
+]
+_PRINT_NUMERIC_COLUMNS = {"Shift A KG", "Shift B KG", "Total KG"}
+
+
+def _escape_html(value: object) -> str:
+    text = "" if value is None or pd.isna(value) else str(value)
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+# A4 pagination budget, all in millimetres. Row/heading heights are picked so the
+# CSS font-size + padding used below always renders SHORTER than the budgeted
+# value — the budget is intentionally conservative so content never overflows a
+# simulated page (which would break the 1 preview page = 1 printed page guarantee).
+_PAGE_HEIGHT_MM = 297
+_PAGE_WIDTH_MM = 210
+_PAGE_PADDING_MM = 14
+_CONTENT_HEIGHT_MM = _PAGE_HEIGHT_MM - 2 * _PAGE_PADDING_MM
+_SAFETY_BUFFER_MM = 10
+_USABLE_HEIGHT_MM = _CONTENT_HEIGHT_MM - _SAFETY_BUFFER_MM
+
+_TITLE_BLOCK_MM = 12
+_RUNNING_HEADER_MM = 8
+_CONTRACTOR_HEADER_MM = 8
+_COLUMN_HEADER_MM = 7
+_DATA_ROW_MM = 6
+_TOTAL_ROW_MM = 7
+_SPACER_MM = 6
+
+
+def build_contractor_print_html(result: ReportResult, report_date: date | None = None) -> str:
+    """Build a standalone, paginated A4 HTML document listing every contractor's issue sheet.
+
+    Page breaks are computed server-side from fixed row-height budgets (not measured
+    in the browser), so the on-screen preview and the physically printed pages are
+    guaranteed to split in exactly the same places.
+    """
+    report_date = report_date or datetime.now().date()
+    contractors = sorted(result.report["Contractor Name"].dropna().unique().tolist())
+
+    contractor_data: list[tuple[str, list[tuple], dict[str, float]]] = []
+    for contractor in contractors:
+        frame = contractor_report_frame(result, contractor)[PRINT_COLUMNS]
+        rows = list(frame.itertuples(index=False, name=None))
+        totals = {column: float(frame[column].sum()) for column in _PRINT_NUMERIC_COLUMNS}
+        contractor_data.append((contractor, rows, totals))
+
+    pages = _paginate_contractors(contractor_data)
+    pages_html = "".join(_render_page(blocks, index, len(pages), report_date) for index, blocks in enumerate(pages))
+
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @page {{ size: A4; margin: 0; }}
+  * {{ box-sizing: border-box; }}
+  html, body {{ margin: 0; padding: 0; background: #e5e7eb; }}
+  body {{ font-family: Arial, Helvetica, sans-serif; color: #111827; }}
+  .print-bar {{ text-align: center; padding: 16px; }}
+  .print-bar button {{
+    background: #E8B923; color: #17150c; border: none; border-radius: 6px;
+    padding: 10px 22px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }}
+  .page {{
+    width: {_PAGE_WIDTH_MM}mm; height: {_PAGE_HEIGHT_MM}mm; padding: {_PAGE_PADDING_MM}mm;
+    margin: 0 auto 16px; background: #ffffff; box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+    position: relative; overflow: hidden;
+  }}
+  .page-title {{
+    font-size: 15px; font-weight: bold; text-align: center; color: #17365D;
+    margin: 0 0 6mm;
+  }}
+  .running-header {{
+    font-size: 11px; font-weight: bold; text-align: center; color: #17365D;
+    margin: 0 0 4mm;
+  }}
+  table.report-table {{ width: 100%; border-collapse: collapse; }}
+  .contractor-header th {{
+    background: #17365D; color: #ffffff; text-align: left; font-size: 13px;
+    padding: 5px 8px;
+  }}
+  .column-header th {{
+    background: #1F4E78; color: #ffffff; font-size: 10.5px; padding: 4px 6px;
+    text-align: center; border: 1px solid #cfd9e8;
+  }}
+  td {{
+    border: 1px solid #cfd9e8; padding: 3px 6px; font-size: 10.5px; text-align: right;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0;
+  }}
+  td:nth-child(1), td:nth-child(2) {{ text-align: left; }}
+  tr.total-row td {{ font-weight: bold; background: #D9EAD3; }}
+  tr.spacer-row td {{ border: none; padding: 0; height: {_SPACER_MM}mm; }}
+  .page-number {{
+    position: absolute; bottom: 5mm; right: {_PAGE_PADDING_MM}mm;
+    font-size: 9px; color: #6b7280;
+  }}
+  @media print {{
+    body {{ background: #ffffff; }}
+    .print-bar {{ display: none; }}
+    .page {{
+      margin: 0; box-shadow: none; page-break-after: always;
+    }}
+    .page:last-child {{ page-break-after: auto; }}
+  }}
+</style>
+</head>
+<body>
+  <div class="print-bar"><button onclick="window.print()">Print / open print window</button></div>
+  {pages_html}
+</body>
+</html>"""
+
+
+def _paginate_contractors(
+    contractor_data: list[tuple[str, list[tuple], dict[str, float]]],
+) -> list[list[tuple]]:
+    """Split contractor blocks into pages using fixed mm-height budgets.
+
+    Returns a list of pages; each page is a list of block tuples such as
+    ("contractor_header", name, continued), ("column_header",), ("data_row", row),
+    ("total_row", totals) or ("spacer",).
+    """
+    pages: list[list[tuple]] = []
+    current: list[tuple] = []
+    current_height = 0.0
+
+    def usable_height() -> float:
+        header = _TITLE_BLOCK_MM if not pages else _RUNNING_HEADER_MM
+        return _USABLE_HEIGHT_MM - header
+
+    def start_new_page() -> None:
+        nonlocal current, current_height
+        pages.append(current)
+        current = []
+        current_height = 0.0
+
+    for contractor, rows, totals in contractor_data:
+        capacity = usable_height()
+        section_head_height = _CONTRACTOR_HEADER_MM + _COLUMN_HEADER_MM
+        first_row_height = _DATA_ROW_MM if rows else _TOTAL_ROW_MM
+        if current and current_height + section_head_height + first_row_height > capacity:
+            start_new_page()
+            capacity = usable_height()
+
+        current.append(("contractor_header", contractor, False))
+        current.append(("column_header",))
+        current_height += section_head_height
+
+        for row in rows:
+            if current_height + _DATA_ROW_MM > capacity:
+                start_new_page()
+                capacity = usable_height()
+                current.append(("contractor_header", contractor, True))
+                current.append(("column_header",))
+                current_height += section_head_height
+            current.append(("data_row", row))
+            current_height += _DATA_ROW_MM
+
+        if current_height + _TOTAL_ROW_MM > capacity:
+            start_new_page()
+            capacity = usable_height()
+            current.append(("contractor_header", contractor, True))
+            current.append(("column_header",))
+            current_height += section_head_height
+        current.append(("total_row", totals))
+        current_height += _TOTAL_ROW_MM
+
+        if current_height + _SPACER_MM <= capacity:
+            current.append(("spacer",))
+            current_height += _SPACER_MM
+
+    if current:
+        pages.append(current)
+    return pages or [[]]
+
+
+def _render_page(blocks: list[tuple], index: int, total_pages: int, report_date: date) -> str:
+    header_html = (
+        f'<div class="page-title">CONTRACTOR-WISE PRINTING MATERIAL ISSUE REPORT &mdash; {report_date:%d-%m-%Y}</div>'
+        if index == 0
+        else f'<div class="running-header">CONTRACTOR-WISE PRINTING MATERIAL ISSUE REPORT &mdash; {report_date:%d-%m-%Y} (continued)</div>'
+    )
+
+    rows_html: list[str] = []
+    for block in blocks:
+        kind = block[0]
+        if kind == "contractor_header":
+            _, contractor, continued = block
+            label = _escape_html(contractor) + (" (continued)" if continued else "")
+            rows_html.append(f"<tr class='contractor-header'><th colspan='7'>{label}</th></tr>")
+        elif kind == "column_header":
+            rows_html.append(
+                "<tr class='column-header'>"
+                "<th>Printing Item Name</th><th>Machine Line Name</th><th>Shift A KG</th>"
+                "<th>Shift B KG</th><th>Total KG</th><th>Issued in PCS</th><th>Issued in KG</th>"
+                "</tr>"
+            )
+        elif kind == "data_row":
+            _, row = block
+            cells = []
+            for column, value in zip(PRINT_COLUMNS, row):
+                if column in _PRINT_NUMERIC_COLUMNS:
+                    text = "" if pd.isna(value) else f"{value:,.0f}"
+                else:
+                    text = _escape_html(value)
+                cells.append(f"<td>{text}</td>")
+            rows_html.append("<tr>" + "".join(cells) + "</tr>")
+        elif kind == "total_row":
+            _, totals = block
+            rows_html.append(
+                "<tr class='total-row'>"
+                "<td colspan='2'>TOTAL</td>"
+                f"<td>{totals['Shift A KG']:,.0f}</td>"
+                f"<td>{totals['Shift B KG']:,.0f}</td>"
+                f"<td>{totals['Total KG']:,.0f}</td>"
+                "<td></td><td></td>"
+                "</tr>"
+            )
+        elif kind == "spacer":
+            rows_html.append("<tr class='spacer-row'><td colspan='7'></td></tr>")
+
+    return (
+        "<div class='page'>"
+        + header_html
+        + "<table class='report-table'>" + "".join(rows_html) + "</table>"
+        + f"<div class='page-number'>Page {index + 1} of {total_pages}</div>"
+        + "</div>"
+    )

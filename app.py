@@ -3,10 +3,11 @@ from pathlib import Path
 
 import streamlit as st
 
+import streamlit.components.v1 as components
+
 from report_engine import (
+    build_contractor_print_html,
     build_report,
-    contractor_report_frame,
-    create_contractor_excel_report,
     create_excel_report,
 )
 from version import APP_VERSION
@@ -249,7 +250,6 @@ with generate_tab:
                 try:
                     result = build_report(master_file, shift_a_file, shift_b_file, default_allowance)
                     st.session_state["result"] = result
-                    st.session_state["report_date"] = report_date
                 except Exception as exc:
                     st.session_state.pop("result", None)
                     st.error(f"The workbooks could not be processed: {exc}")
@@ -303,50 +303,24 @@ with generate_tab:
         )
 
         if result.valid:
-            excel = create_excel_report(result, st.session_state["report_date"])
+            excel = create_excel_report(result, report_date)
             st.download_button(
                 "Download overall report",
                 data=excel,
-                file_name=f"Contractor_Printing_Issue_Report_{st.session_state['report_date']:%d-%m-%Y}.xlsx",
+                file_name=f"Contractor_Printing_Issue_Report_{report_date:%d-%m-%Y}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 type="primary",
                 width="stretch",
             )
 
         st.subheader("Contractor-specific report")
-        contractor_options = ["All contractors"] + sorted(
-            overall_display["Contractor Name"].dropna().unique().tolist()
+        st.caption(
+            "Every contractor's issue sheet, grouped and totalled, ready to print on A4. "
+            "Issued in PCS and Issued in KG are blank entry columns for the actual quantity issued. "
+            "Change the report date in the sidebar to update the date shown here."
         )
-        contractor_filter = st.selectbox("Select contractor for preview and download", contractor_options)
-        if contractor_filter == "All contractors":
-            st.info("Select a contractor to create its concise issue report.")
-        else:
-            contractor_display = contractor_report_frame(result, contractor_filter)
-            st.caption(
-                "Issued in PCS and Issued in KG are blank entry columns for the actual quantity issued."
-            )
-            st.dataframe(
-                contractor_display,
-                column_config=kg_column_config,
-                width="stretch",
-                hide_index=True,
-                height=420,
-            )
-            if result.valid:
-                contractor_excel = create_contractor_excel_report(
-                    result,
-                    contractor_filter,
-                    st.session_state["report_date"],
-                )
-                safe_contractor = "_".join(contractor_filter.split())
-                st.download_button(
-                    f"Download {contractor_filter} report",
-                    data=contractor_excel,
-                    file_name=f"{safe_contractor}_Printing_Issue_Report_{st.session_state['report_date']:%d-%m-%Y}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    type="primary",
-                    width="stretch",
-                )
+        print_html = build_contractor_print_html(result, report_date)
+        components.html(print_html, height=700, scrolling=True)
 
 with process_tab:
     st.subheader("What happens after you upload the files")
