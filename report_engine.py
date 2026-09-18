@@ -513,6 +513,7 @@ _PAGE_HEIGHT_MM = 297
 _PAGE_WIDTH_MM = 210
 _PAGE_PADDING_MM = 14
 _CONTENT_HEIGHT_MM = _PAGE_HEIGHT_MM - 2 * _PAGE_PADDING_MM
+_CONTENT_WIDTH_MM = _PAGE_WIDTH_MM - 2 * _PAGE_PADDING_MM
 _SAFETY_BUFFER_MM = 10
 _USABLE_HEIGHT_MM = _CONTENT_HEIGHT_MM - _SAFETY_BUFFER_MM
 
@@ -523,6 +524,43 @@ _COLUMN_HEADER_MM = 7
 _DATA_ROW_MM = 6
 _TOTAL_ROW_MM = 7
 _SPACER_MM = 6
+
+# Column widths adapt to the longest value actually present, so full names
+# stay on one line (the row-height budget above assumes single-line rows).
+_CHAR_WIDTH_MM = 1.9
+_CELL_PADDING_MM = 6.0
+_MIN_ITEM_NAME_MM = 45.0
+_MAX_ITEM_NAME_MM = 110.0
+_MIN_MACHINE_NAME_MM = 28.0
+_MAX_MACHINE_NAME_MM = 70.0
+_MIN_OTHER_COLUMN_MM = 12.0
+_OTHER_COLUMN_COUNT = 5
+
+
+def _text_column_width(values: list[str], min_mm: float, max_mm: float) -> float:
+    longest = max((len(v) for v in values), default=0)
+    width = longest * _CHAR_WIDTH_MM + _CELL_PADDING_MM
+    return min(max_mm, max(min_mm, width))
+
+
+def _compute_column_widths(result: ReportResult) -> tuple[float, float, float]:
+    item_names = result.report["Printing Item Name"].dropna().astype(str).tolist()
+    machine_names = result.report["Machine Line Name"].dropna().astype(str).tolist()
+
+    item_mm = _text_column_width(item_names, _MIN_ITEM_NAME_MM, _MAX_ITEM_NAME_MM)
+    machine_mm = _text_column_width(machine_names, _MIN_MACHINE_NAME_MM, _MAX_MACHINE_NAME_MM)
+
+    other_total_floor = _MIN_OTHER_COLUMN_MM * _OTHER_COLUMN_COUNT
+    remaining = _CONTENT_WIDTH_MM - item_mm - machine_mm
+    if remaining < other_total_floor:
+        deficit = other_total_floor - remaining
+        flex_total = item_mm + machine_mm
+        item_mm -= deficit * (item_mm / flex_total)
+        machine_mm -= deficit * (machine_mm / flex_total)
+        remaining = other_total_floor
+
+    other_mm = remaining / _OTHER_COLUMN_COUNT
+    return item_mm, machine_mm, other_mm
 
 
 def build_contractor_print_html(result: ReportResult, report_date: date | None = None) -> str:
@@ -543,7 +581,11 @@ def build_contractor_print_html(result: ReportResult, report_date: date | None =
         contractor_data.append((contractor, rows, totals))
 
     pages = _paginate_contractors(contractor_data)
-    pages_html = "".join(_render_page(blocks, index, len(pages), report_date) for index, blocks in enumerate(pages))
+    item_mm, machine_mm, other_mm = _compute_column_widths(result)
+    pages_html = "".join(
+        _render_page(blocks, index, len(pages), report_date, item_mm, machine_mm, other_mm)
+        for index, blocks in enumerate(pages)
+    )
 
     return f"""<!DOCTYPE html>
 <html>
@@ -572,7 +614,7 @@ def build_contractor_print_html(result: ReportResult, report_date: date | None =
     font-size: 11px; font-weight: bold; text-align: center; color: #17365D;
     margin: 0 0 4mm;
   }}
-  table.report-table {{ width: 100%; border-collapse: collapse; }}
+  table.report-table {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
   .contractor-header th {{
     background: #D9E2F3; color: #17365D; text-align: left; font-size: 13px;
     font-weight: bold; padding: 5px 8px; border-bottom: 2px solid #17365D;
@@ -583,7 +625,7 @@ def build_contractor_print_html(result: ReportResult, report_date: date | None =
   }}
   td {{
     border: 1px solid #9fb2c8; padding: 3px 6px; font-size: 10.5px; text-align: right;
-    color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0;
+    color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }}
   td:nth-child(1), td:nth-child(2) {{ text-align: left; }}
   tr.total-row td {{ font-weight: bold; background: #D9EAD3; color: #14532D; border-color: #4b7a57; }}
@@ -675,7 +717,15 @@ def _paginate_contractors(
     return pages or [[]]
 
 
-def _render_page(blocks: list[tuple], index: int, total_pages: int, report_date: date) -> str:
+def _render_page(
+    blocks: list[tuple],
+    index: int,
+    total_pages: int,
+    report_date: date,
+    item_mm: float,
+    machine_mm: float,
+    other_mm: float,
+) -> str:
     header_html = (
         f'<div class="page-title">CONTRACTOR-WISE PRINTING MATERIAL ISSUE REPORT &mdash; {report_date:%d-%m-%Y}</div>'
         if index == 0
@@ -720,10 +770,19 @@ def _render_page(blocks: list[tuple], index: int, total_pages: int, report_date:
         elif kind == "spacer":
             rows_html.append("<tr class='spacer-row'><td colspan='7'></td></tr>")
 
+    colgroup = (
+        "<colgroup>"
+        f"<col style='width:{item_mm:.1f}mm'><col style='width:{machine_mm:.1f}mm'>"
+        f"<col style='width:{other_mm:.1f}mm'><col style='width:{other_mm:.1f}mm'>"
+        f"<col style='width:{other_mm:.1f}mm'><col style='width:{other_mm:.1f}mm'>"
+        f"<col style='width:{other_mm:.1f}mm'>"
+        "</colgroup>"
+    )
+
     return (
         "<div class='page'>"
         + header_html
-        + "<table class='report-table'>" + "".join(rows_html) + "</table>"
+        + "<table class='report-table'>" + colgroup + "".join(rows_html) + "</table>"
         + f"<div class='page-number'>Page {index + 1} of {total_pages}</div>"
         + "</div>"
     )
