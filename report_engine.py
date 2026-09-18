@@ -574,23 +574,26 @@ def build_contractor_print_html(result: ReportResult, report_date: date | None =
   }}
   table.report-table {{ width: 100%; border-collapse: collapse; }}
   .contractor-header th {{
-    background: #17365D; color: #ffffff; text-align: left; font-size: 13px;
-    padding: 5px 8px;
+    background: #D9E2F3; color: #17365D; text-align: left; font-size: 13px;
+    font-weight: bold; padding: 5px 8px; border-bottom: 2px solid #17365D;
   }}
   .column-header th {{
-    background: #1F4E78; color: #ffffff; font-size: 10.5px; padding: 4px 6px;
-    text-align: center; border: 1px solid #cfd9e8;
+    background: #EAF0F8; color: #17365D; font-size: 10.5px; font-weight: bold;
+    padding: 4px 6px; text-align: center; border: 1px solid #17365D;
   }}
   td {{
-    border: 1px solid #cfd9e8; padding: 3px 6px; font-size: 10.5px; text-align: right;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0;
+    border: 1px solid #9fb2c8; padding: 3px 6px; font-size: 10.5px; text-align: right;
+    color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0;
   }}
   td:nth-child(1), td:nth-child(2) {{ text-align: left; }}
-  tr.total-row td {{ font-weight: bold; background: #D9EAD3; }}
+  tr.total-row td {{ font-weight: bold; background: #D9EAD3; color: #14532D; border-color: #4b7a57; }}
   tr.spacer-row td {{ border: none; padding: 0; height: {_SPACER_MM}mm; }}
   .page-number {{
     position: absolute; bottom: 5mm; right: {_PAGE_PADDING_MM}mm;
     font-size: 9px; color: #6b7280;
+  }}
+  * {{
+    -webkit-print-color-adjust: exact; print-color-adjust: exact; color-adjust: exact;
   }}
   @media print {{
     body {{ background: #ffffff; }}
