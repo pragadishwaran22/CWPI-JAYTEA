@@ -1,14 +1,13 @@
 from datetime import date
 from pathlib import Path
-import re
 
 import streamlit as st
 
 import streamlit.components.v1 as components
 
 from classifier_engine import (
-    combined_contractor_sections,
-    create_classifier_excel_report,
+    create_all_classifier_excel_report,
+    list_classifier_contractors,
     parse_classifier_workbook,
 )
 from report_engine import (
@@ -44,7 +43,7 @@ def supabase_mapping_config() -> tuple[str, str] | None:
 
 
 st.set_page_config(
-    page_title="JAY Printing Issue Report",
+    page_title="JAY Contractor wise Report",
     page_icon=str(LOGO_PATH),
     layout="wide",
     initial_sidebar_state="expanded",
@@ -252,6 +251,12 @@ st.markdown(
 )
 
 def render_hero(scope: str):
+    if scope == "classifier":
+        hero_title = "Contractor-wise Overall Classifier Report"
+        hero_copy = "Explore each contractor's production plans and material requirements across Shift A and Shift B."
+    else:
+        hero_title = "Contractor-wise Printing Issue Report"
+        hero_copy = "Turn Shift A and Shift B workbooks into a validated, contractor-ready PCS and KG issue report."
     with st.container(key=f"hero_glass_{scope}"):
         hero_logo, hero_content = st.columns([1, 4.8], vertical_alignment="center", gap="medium")
         with hero_logo:
@@ -259,31 +264,47 @@ def render_hero(scope: str):
                 st.image(str(LOGO_PATH), width="stretch")
         with hero_content:
             st.markdown(
-                """
+                f"""
                 <div class="eyebrow">JAY · Production intelligence</div>
-                <div class="hero-title">Contractor-wise Printing Issue Report</div>
-                <p class="hero-copy">Turn Shift A and Shift B workbooks into a validated, contractor-ready PCS and KG issue report.</p>
+                <div class="hero-title">{hero_title}</div>
+                <p class="hero-copy">{hero_copy}</p>
                 <div class="hero-chip">PRECISION · CONTROL · AUDIT READY</div>
                 """,
                 unsafe_allow_html=True,
             )
 
+generate_tab, classifier_tab = st.tabs([
+    "📊 Printing issue report",
+    "🗂️ Overall classifier report",
+], key="main_tabs", on_change="rerun")
+
+st.session_state.setdefault("report_date", date.today())
+st.session_state.setdefault("default_allowance", 3.0)
+report_date = st.session_state["report_date"]
+default_allowance = st.session_state["default_allowance"]
+
 with st.sidebar:
     st.markdown(f'<div class="app-version-badge">Version {APP_VERSION}</div>', unsafe_allow_html=True)
-    st.markdown("## Report controls")
-    st.caption("These values are shown in the generated report.")
-    report_date = st.date_input("Report date", value=date.today(), format="DD-MM-YYYY")
-    default_allowance = st.number_input("Default allowance (%)", min_value=0.0, max_value=99.99, value=3.0, step=0.1, help="Applied only when the master Allowance field is blank.")
-    st.markdown("---")
-    st.markdown("**Calculation source**")
-    st.caption("Request Qty → Item master → Machine weights → KG → allowance")
-    st.markdown("**Safety rule**")
-    st.caption("Missing or conflicting mappings block the Excel download.")
-
-generate_tab, classifier_tab = st.tabs([
-    "📊 Generate report",
-    "🗂️ Contractor-wise classifier report",
-], key="main_tabs")
+    if classifier_tab.open:
+        st.markdown("## Classifier report")
+        st.caption("Export all contractors from both shift workbooks.")
+        st.markdown("**Source workbooks**")
+        st.caption("Upload Shift A and Shift B in this tab, or use the files already uploaded in Printing issue report.")
+        st.markdown("**Included sections**")
+        st.caption("Production plans, printing, packing, speciality tea and black tea.")
+        st.markdown("---")
+        st.markdown("**Data handling**")
+        st.caption("Quantities stay as supplied. No printing master, report date, allowance or KG conversion is used.")
+    else:
+        st.markdown("## Report controls")
+        st.caption("These values are shown in the generated report.")
+        report_date = st.date_input("Report date", key="report_date", persist_state="session", format="DD-MM-YYYY")
+        default_allowance = st.number_input("Default allowance (%)", key="default_allowance", persist_state="session", min_value=0.0, max_value=99.99, step=0.1, help="Applied only when the master Allowance field is blank.")
+        st.markdown("---")
+        st.markdown("**Calculation source**")
+        st.caption("Request Qty → Item master → Machine weights → KG → allowance")
+        st.markdown("**Safety rule**")
+        st.caption("Missing or conflicting mappings block the Excel download.")
 
 with generate_tab:
     render_hero("generate")
@@ -399,13 +420,13 @@ with generate_tab:
 
 with classifier_tab:
     render_hero("classifier")
-    st.subheader("Contractor-wise classifier report")
+    st.subheader("Create the contractor workbook")
     st.caption(
-        "Search one contractor's production plans and printing, packing, speciality tea and black tea "
+        "Export every contractor's production plans and printing, packing, speciality tea and black tea "
         "materials across both shifts. Quantities are shown as supplied in the workbooks; "
-        "the sidebar allowance and report date are not used here."
+        "printing issue report settings are not used here."
     )
-    st.caption("Use the shift workbooks from Generate report, or upload a pair here. The printing master is not needed.")
+    st.caption("Use the shift workbooks from Printing issue report, or upload a pair here. The printing master is not needed.")
     classifier_upload_a, classifier_upload_b = st.columns(2)
     with classifier_upload_a:
         classifier_a_file = st.file_uploader("Shift A workbook for classifier", type=["xlsx"], key="classifier_shift_a")
@@ -415,7 +436,7 @@ with classifier_tab:
     source_a = classifier_a_file or shift_a_file
     source_b = classifier_b_file or shift_b_file
     if source_a is None or source_b is None:
-        st.info("Upload both Shift A and Shift B workbooks to search contractor data.")
+        st.info("Upload both Shift A and Shift B workbooks to create the contractor workbook.")
     else:
         try:
             with st.spinner("Reading contractor sections from both workbooks…"):
@@ -426,34 +447,31 @@ with classifier_tab:
         except Exception as exc:
             st.error(f"The classifier could not read the workbooks: {exc}")
         else:
-            contractor_names = sorted(set().union(*(shift.contractors for shift in classifier_shifts)), key=str.casefold)
+            contractor_names = list_classifier_contractors(classifier_shifts)
             if not contractor_names:
                 st.warning("No contractor sections were found in the uploaded workbooks.")
             else:
-                selected_contractor = st.selectbox("Select contractor", contractor_names)
-                sections = combined_contractor_sections(classifier_shifts, selected_contractor)
-                total_rows = sum(len(rows) for rows in sections.values())
+                section_counts = {
+                    section_name: sum(len(shift.sections[section_name]) for shift in classifier_shifts)
+                    for section_name in classifier_shifts[0].sections
+                }
                 with st.container(border=True):
-                    st.caption("CONTRACTOR REPORT OVERVIEW")
-                    st.badge(selected_contractor, color="yellow", icon=":material/person:")
-                    st.metric("Total source rows", f"{total_rows:,}")
-                    for section_name, rows in sections.items():
-                        shift_a_rows = int((rows["Shift"] == "Shift A").sum())
-                        shift_b_rows = int((rows["Shift"] == "Shift B").sum())
+                    st.caption("WORKBOOK OVERVIEW")
+                    st.metric("Contractor worksheets", f"{len(contractor_names):,}")
+                    st.metric("Total source rows", f"{sum(section_counts.values()):,}")
+                    for section_name, count in section_counts.items():
                         st.markdown(
-                            f"**{section_name}** · {shift_a_rows} Shift A + "
-                            f"{shift_b_rows} Shift B = {len(rows)} rows"
+                            f"**{section_name}** · {count:,} rows across Shift A and Shift B"
                         )
                     st.caption(
-                        "Download includes one worksheet with all five types and both shifts. "
+                        "Download includes one worksheet per contractor, each with all five types and both shifts. "
                         "In Excel, use the + / − controls above the columns to collapse production or material details."
                     )
 
-                safe_contractor = re.sub(r"[^A-Za-z0-9_-]+", "_", selected_contractor).strip("_")
                 st.download_button(
-                    "Download contractor classifier report",
-                    data=create_classifier_excel_report(classifier_shifts, selected_contractor),
-                    file_name=f"{safe_contractor}_Contractor_Classifier.xlsx",
+                    "Download overall classifier report",
+                    data=create_all_classifier_excel_report(classifier_shifts),
+                    file_name="Overall_Contractor_Classifier.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     type="primary",
                     width="stretch",
