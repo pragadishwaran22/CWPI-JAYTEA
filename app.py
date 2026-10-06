@@ -1,19 +1,46 @@
 from datetime import date
 from pathlib import Path
+import re
 
 import streamlit as st
 
 import streamlit.components.v1 as components
 
+from classifier_engine import (
+    combined_contractor_sections,
+    create_classifier_excel_report,
+    parse_classifier_workbook,
+)
 from report_engine import (
     build_contractor_print_html,
     build_report,
     create_excel_report,
 )
 from version import APP_VERSION
+from mapping_store import fetch_approved_name_mappings
 
 
-LOGO_PATH = Path(__file__).parent / "assets" / "jay-logo.png"
+LOGO_PATH = Path(__file__).parent / "assets" / "glossy_gold_jay_oval_emblem.png"
+
+
+@st.cache_data(show_spinner=False)
+def read_classifier_shift(workbook_bytes: bytes, shift: str):
+    return parse_classifier_workbook(workbook_bytes, shift)
+
+
+@st.cache_data(ttl="15m", max_entries=4, show_spinner=False)
+def read_name_mappings(project_url: str, publishable_key: str):
+    return fetch_approved_name_mappings(project_url, publishable_key)
+
+
+def supabase_mapping_config() -> tuple[str, str] | None:
+    try:
+        config = st.secrets.get("supabase", {})
+    except FileNotFoundError:
+        return None
+    project_url = str(config.get("url", "")).strip()
+    publishable_key = str(config.get("publishable_key", "")).strip()
+    return (project_url, publishable_key) if project_url and publishable_key else None
 
 
 st.set_page_config(
@@ -21,8 +48,9 @@ st.set_page_config(
     page_icon=str(LOGO_PATH),
     layout="wide",
     initial_sidebar_state="expanded",
-    menu_items={"About": "### JAY Printing Issue Report\nValidated contractor-wise PCS and KG reporting."},
+    menu_items={"About": None},
 )
+st.set_option("client.toolbarMode", "minimal")
 st.logo(str(LOGO_PATH), size="large")
 
 st.markdown(
@@ -60,12 +88,11 @@ st.markdown(
     .stApp::before { top: 18%; left: 30%; background: #D7A919; }
     .stApp::after { right: 8%; bottom: 8%; background: #757982; }
     [data-testid="stHeader"] {
-        background: rgba(8, 9, 13, .68);
-        border-bottom: 1px solid rgba(255, 235, 174, .09);
-        backdrop-filter: blur(24px) saturate(145%);
-        -webkit-backdrop-filter: blur(24px) saturate(145%);
+        background: transparent;
+        border-bottom: 0;
+        box-shadow: none;
     }
-    .block-container { max-width: 1320px; padding-top: 2rem; padding-bottom: 4rem; }
+    .block-container { max-width: 1320px; padding-top: 3rem; padding-bottom: 4rem; }
     [data-testid="stSidebar"] {
         background: linear-gradient(165deg, rgba(14, 15, 19, .94), rgba(22, 21, 18, .86));
         border-right: 1px solid rgba(244, 214, 106, .14);
@@ -85,19 +112,20 @@ st.markdown(
         -webkit-text-fill-color: var(--jay-warm) !important;
         opacity: 1 !important;
     }
-    .st-key-hero_glass {
+    .st-key-hero_glass_generate, .st-key-hero_glass_classifier {
         position: relative;
         overflow: hidden;
-        padding: clamp(1.5rem, 4vw, 3rem);
-        margin-bottom: 1.5rem;
+        padding: clamp(1rem, 2vw, 1.5rem);
+        margin: .35rem auto 1.1rem;
+        max-width: 850px;
         border: 1px solid rgba(255, 239, 187, .22);
-        border-radius: 32px;
+        border-radius: 26px;
         background: linear-gradient(135deg, rgba(255, 255, 255, .13), rgba(255, 255, 255, .045));
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, .24), inset 0 -1px 0 rgba(255, 211, 76, .06), 0 24px 70px rgba(0, 0, 0, .38);
         backdrop-filter: blur(30px) saturate(165%);
         -webkit-backdrop-filter: blur(30px) saturate(165%);
     }
-    .st-key-hero_glass::before {
+    .st-key-hero_glass_generate::before, .st-key-hero_glass_classifier::before {
         content: "";
         position: absolute;
         width: 22rem;
@@ -108,30 +136,17 @@ st.markdown(
         background: radial-gradient(circle, rgba(244, 214, 106, .38), transparent 68%);
         pointer-events: none;
     }
-    .st-key-hero_logo {
-        padding: 1.15rem;
+    .st-key-hero_logo_generate, .st-key-hero_logo_classifier {
+        padding: .2rem;
         border: 1px solid rgba(255, 235, 174, .22);
-        border-radius: 28px;
+        border-radius: 18px;
         background: rgba(2, 2, 3, .42);
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, .14), 0 18px 38px rgba(0, 0, 0, .34);
     }
-    .hero-title { margin: .35rem 0 .55rem; color: var(--jay-warm); font-size: clamp(2rem, 4.4vw, 3.65rem); line-height: 1.04; letter-spacing: -.045em; font-weight: 780; }
-    .hero-copy { margin: 0; max-width: 760px; color: #D7D2C8; font-size: clamp(1rem, 1.5vw, 1.15rem); line-height: 1.65; }
-    .eyebrow { color: var(--jay-gold-light); font-size: .76rem; text-transform: uppercase; letter-spacing: .18em; font-weight: 800; }
-    .hero-chip { display: inline-flex; margin-top: 1rem; padding: .4rem .78rem; border: 1px solid rgba(244, 214, 106, .24); border-radius: 999px; background: rgba(215, 169, 25, .10); color: #F4D66A; font-size: .78rem; font-weight: 700; letter-spacing: .04em; }
-    .step-card, .info-card, .formula {
-        border: 1px solid var(--jay-line);
-        border-radius: 22px;
-        background: linear-gradient(145deg, rgba(255, 255, 255, .105), rgba(255, 255, 255, .035));
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, .16), 0 16px 40px rgba(0, 0, 0, .22);
-        backdrop-filter: blur(22px) saturate(145%);
-        -webkit-backdrop-filter: blur(22px) saturate(145%);
-    }
-    .step-card, .info-card { padding: 22px; min-height: 168px; }
-    .step-number { width: 38px; height: 38px; border-radius: 13px; display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(145deg, #F4D66A, #B9890B); color: #17130A; font-weight: 900; margin-bottom: 14px; box-shadow: 0 8px 22px rgba(215,169,25,.24); }
-    .step-card h4, .info-card h4 { color: var(--jay-warm); margin: 0 0 8px; }
-    .step-card p, .info-card p { color: #BDB9B0; margin: 0; line-height: 1.55; }
-    .formula { padding: 20px 24px; border-left: 3px solid var(--jay-gold); color: #E9E3D7; font-size: 1rem; line-height: 1.8; }
+    .hero-title { margin: .2rem 0 .35rem; color: var(--jay-warm); font-size: clamp(1.85rem, 3vw, 2.7rem); line-height: 1.08; letter-spacing: -.04em; font-weight: 780; }
+    .hero-copy { margin: 0; max-width: 680px; color: #D7D2C8; font-size: .94rem; line-height: 1.45; }
+    .eyebrow { color: var(--jay-gold-light); font-size: .68rem; text-transform: uppercase; letter-spacing: .15em; font-weight: 800; }
+    .hero-chip { display: inline-flex; margin-top: .65rem; padding: .32rem .65rem; border: 1px solid rgba(244, 214, 106, .24); border-radius: 999px; background: rgba(215, 169, 25, .10); color: #F4D66A; font-size: .69rem; font-weight: 700; letter-spacing: .03em; }
     div[data-testid="stMetric"],
     [data-testid="stVerticalBlockBorderWrapper"],
     [data-testid="stExpander"],
@@ -163,8 +178,43 @@ st.markdown(
     .stButton > button, .stDownloadButton > button { min-height: 2.8rem; border-radius: 999px; font-weight: 800; letter-spacing: .01em; transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
     .stButton > button:hover, .stDownloadButton > button:hover { transform: translateY(-1px); border-color: var(--jay-gold-light); box-shadow: 0 12px 26px rgba(215, 169, 25, .18); }
     .stButton > button[kind="primary"], .stDownloadButton > button[kind="primary"] { color: #17130A; background: linear-gradient(135deg, #F4D66A, #C69712); border: 1px solid #F7DF82; }
-    button[data-baseweb="tab"] { border-radius: 999px; padding: .55rem 1rem; color: #BDB9B0; }
-    button[data-baseweb="tab"][aria-selected="true"] { color: #17130A; background: linear-gradient(135deg, #F4D66A, #C69712); box-shadow: 0 10px 24px rgba(215,169,25,.18); }
+    .st-key-main_tabs [data-baseweb="tab-list"] {
+        display: inline-flex;
+        width: max-content;
+        max-width: 100%;
+        gap: .35rem;
+        padding: .35rem;
+        border: 1px solid rgba(255, 235, 174, .20);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, .07);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 12px 30px rgba(0,0,0,.20);
+        backdrop-filter: blur(18px) saturate(145%);
+        overflow-x: auto;
+    }
+    .st-key-main_tabs [data-baseweb="tab-border"], .st-key-main_tabs [data-baseweb="tab-highlight"] { display: none; }
+    .st-key-main_tabs button[data-baseweb="tab"] {
+        flex: 0 0 auto;
+        min-height: 2.65rem;
+        border-radius: 999px;
+        padding: .65rem 1.05rem;
+        color: #F7F2E6;
+        font-size: .94rem;
+        font-weight: 750;
+        white-space: nowrap;
+        opacity: 1;
+        transition: background .22s ease, color .22s ease, box-shadow .22s ease, transform .22s ease;
+    }
+    .st-key-main_tabs button[data-baseweb="tab"]:hover { background: rgba(244, 214, 106, .13); color: #F4D66A; transform: translateY(-1px); }
+    .st-key-main_tabs button[data-baseweb="tab"][aria-selected="true"] { color: #17130A; background: linear-gradient(135deg, #F4D66A, #C69712); box-shadow: 0 8px 20px rgba(215,169,25,.18); }
+    .st-key-main_tabs [role="tabpanel"]:not([hidden]) { animation: tab-reveal .28s ease-out both; }
+    @keyframes tab-reveal {
+        from { opacity: .35; transform: translateY(8px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .st-key-main_tabs button[data-baseweb="tab"] { transition: none; }
+        .st-key-main_tabs [role="tabpanel"] { animation: none !important; }
+    }
     [data-testid="stProgress"] > div > div { background: linear-gradient(90deg, #B9890B, #F4D66A); }
     [data-testid="stDataFrame"] { overflow: hidden; border: 1px solid rgba(255, 235, 174, .16); border-radius: 20px; box-shadow: 0 18px 44px rgba(0,0,0,.20); }
     h1, h2, h3, h4 { letter-spacing: -.025em; }
@@ -191,30 +241,32 @@ st.markdown(
     }
     @media (max-width: 640px) {
         .app-version-badge { top: .9rem; left: 9.25rem; font-size: .72rem; }
-        .block-container { padding-top: 1.2rem; }
-        .st-key-hero_glass { padding: 1.25rem; border-radius: 24px; }
-        .hero-title { font-size: 2.15rem; }
+        .block-container { padding-top: 3rem; }
+        .st-key-hero_glass_generate, .st-key-hero_glass_classifier { padding: 1rem; border-radius: 22px; }
+        .hero-title { font-size: 1.9rem; }
+        .st-key-main_tabs button[data-baseweb="tab"] { padding: .55rem .8rem; font-size: .86rem; }
     }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-with st.container(key="hero_glass"):
-    hero_logo, hero_content = st.columns([1, 4.2], vertical_alignment="center", gap="large")
-    with hero_logo:
-        with st.container(key="hero_logo"):
-            st.image(str(LOGO_PATH), width="stretch")
-    with hero_content:
-        st.markdown(
-            """
-            <div class="eyebrow">JAY · Production intelligence</div>
-            <div class="hero-title">Contractor-wise<br>Printing Issue Report</div>
-            <p class="hero-copy">Transform daily Shift A and Shift B workbooks into a validated, contractor-ready PCS and KG issue report—accurately and in one refined workflow.</p>
-            <div class="hero-chip">PRECISION · CONTROL · AUDIT READY</div>
-            """,
-            unsafe_allow_html=True,
-        )
+def render_hero(scope: str):
+    with st.container(key=f"hero_glass_{scope}"):
+        hero_logo, hero_content = st.columns([1, 4.8], vertical_alignment="center", gap="medium")
+        with hero_logo:
+            with st.container(key=f"hero_logo_{scope}"):
+                st.image(str(LOGO_PATH), width="stretch")
+        with hero_content:
+            st.markdown(
+                """
+                <div class="eyebrow">JAY · Production intelligence</div>
+                <div class="hero-title">Contractor-wise Printing Issue Report</div>
+                <p class="hero-copy">Turn Shift A and Shift B workbooks into a validated, contractor-ready PCS and KG issue report.</p>
+                <div class="hero-chip">PRECISION · CONTROL · AUDIT READY</div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 with st.sidebar:
     st.markdown(f'<div class="app-version-badge">Version {APP_VERSION}</div>', unsafe_allow_html=True)
@@ -228,11 +280,15 @@ with st.sidebar:
     st.markdown("**Safety rule**")
     st.caption("Missing or conflicting mappings block the Excel download.")
 
-generate_tab, process_tab, explain_tab = st.tabs(["📊 Generate report", "🔄 How it works", "🗣️ Explain the project"])
+generate_tab, classifier_tab = st.tabs([
+    "📊 Generate report",
+    "🗂️ Contractor-wise classifier report",
+], key="main_tabs")
 
 with generate_tab:
+    render_hero("generate")
     st.subheader("Upload the three source workbooks")
-    st.caption("The daily workbooks must contain PRINTING MATL REQ. Matching uses the exact cleaned Item Name because the daily Item IDs and master item codes are different systems.")
+    st.caption("The daily workbooks must contain PRINTING MATL REQ. Items match the master by cleaned name; an approved M4/MJP name mapping can resolve a different name. Item IDs are not used for matching.")
     master_file = st.file_uploader("Permanent printing master", type=["xlsx"], key="master", help="Contains item name, machine line, PCS/KG, roll weight and core/tare weight.")
     col_a, col_b = st.columns(2)
     with col_a:
@@ -248,11 +304,30 @@ with generate_tab:
         else:
             with st.spinner("Reading sections, matching items and validating calculations…"):
                 try:
-                    result = build_report(master_file, shift_a_file, shift_b_file, default_allowance)
+                    mapping_config = supabase_mapping_config()
+                    mappings = read_name_mappings(*mapping_config) if mapping_config else None
+                    result = build_report(master_file, shift_a_file, shift_b_file, default_allowance, mappings)
                     st.session_state["result"] = result
+                    st.session_state["mapping_status"] = (
+                        f"{len(mappings):,} approved name pairs loaded from Supabase."
+                        if mappings is not None else
+                        "Supabase is not configured; only direct master-name matches are available."
+                    )
                 except Exception as exc:
                     st.session_state.pop("result", None)
-                    st.error(f"The workbooks could not be processed: {exc}")
+                    st.session_state.pop("mapping_status", None)
+                    st.error(f"The report could not be generated: {exc}")
+
+    if st.session_state.get("mapping_status"):
+        st.info(st.session_state["mapping_status"])
+
+    with st.container(border=True):
+        st.markdown("#### How this report works")
+        st.write(
+            "Upload the printing master and both shift workbooks. The app matches printing items "
+            "to the master directly or through an approved M4/MJP name mapping, calculates the issue weight for each shift, and checks for missing details. "
+            "Once the checks pass, you can preview and download the report below."
+        )
 
     result = st.session_state.get("result")
     if result:
@@ -322,41 +397,64 @@ with generate_tab:
         print_html = build_contractor_print_html(result, report_date)
         components.html(print_html, height=700, scrolling=True)
 
-with process_tab:
-    st.subheader("What happens after you upload the files")
-    cards = [
-        ("1", "Read daily blocks", "Find each contractor section and read Item Name and Request Qty from PRINTING MATL REQ."),
-        ("2", "Match the master", "Join the exact cleaned Item Name to Machine Line, PCS/KG, Roll Weight and Core/Tare."),
-        ("3", "Calculate by shift", "Calculate Shift A and Shift B KG independently, then round each result to the nearest whole KG."),
-        ("4", "Validate and export", "Stop on missing mappings; otherwise generate Excel with a validation sheet."),
-    ]
-    cols = st.columns(4)
-    for col, (number, title, body) in zip(cols, cards):
-        col.markdown(f'<div class="step-card"><div class="step-number">{number}</div><h4>{title}</h4><p>{body}</p></div>', unsafe_allow_html=True)
-    st.markdown("### Calculation used")
-    st.markdown("""<div class="formula"><b>Base KG</b> = Request PCS ÷ PCS per KG<br><b>Core/Tare KG</b> = (Base KG ÷ Roll Weight) × Core/Tare Weight<br><b>Final KG</b> = round((Base KG + Core/Tare KG) × (1 + Allowance))<br><b>Total KG</b> = Rounded Shift A KG + Rounded Shift B KG</div>""", unsafe_allow_html=True)
-    st.markdown("### Example: Africa Choice C250")
-    st.dataframe([{"Request PCS": "244,800", "PCS per KG": "1,740", "Roll Weight": "13 kg", "Core/Tare": "0.25 kg", "Allowance": "3%", "Final issue": "148 kg"}], hide_index=True, width="stretch")
+with classifier_tab:
+    render_hero("classifier")
+    st.subheader("Contractor-wise classifier report")
+    st.caption(
+        "Search one contractor's production plans and printing, packing, speciality tea and black tea "
+        "materials across both shifts. Quantities are shown as supplied in the workbooks; "
+        "the sidebar allowance and report date are not used here."
+    )
+    st.caption("Use the shift workbooks from Generate report, or upload a pair here. The printing master is not needed.")
+    classifier_upload_a, classifier_upload_b = st.columns(2)
+    with classifier_upload_a:
+        classifier_a_file = st.file_uploader("Shift A workbook for classifier", type=["xlsx"], key="classifier_shift_a")
+    with classifier_upload_b:
+        classifier_b_file = st.file_uploader("Shift B workbook for classifier", type=["xlsx"], key="classifier_shift_b")
 
-with explain_tab:
-    st.subheader("How to present this project to your teammate")
-    left, right = st.columns(2)
-    with left:
-        st.markdown('<div class="info-card"><h4>Business problem</h4><p>The contractor-wise issue report is created every day from repeated Excel sections. Manual lookup and PCS-to-KG conversion take time and can introduce wrong machine or weight values.</p></div>', unsafe_allow_html=True)
-    with right:
-        st.markdown('<div class="info-card"><h4>Proposed solution</h4><p>A local Streamlit app reads both shifts, validates every exact Item Name against a permanent master, calculates issue weight and produces an auditable Excel report.</p></div>', unsafe_allow_html=True)
-    st.markdown("### Technology and responsibility")
-    st.dataframe([
-        {"Technology": "Streamlit", "Role": "Upload screen, status messages, preview, filters and download"},
-        {"Technology": "Python + Pandas", "Role": "Read repeated contractor blocks, clean text, group quantities and join data"},
-        {"Technology": "OpenPyXL", "Role": "Create the formatted Excel report and validation sheet"},
-        {"Data source": "Permanent master", "Role": "Control Machine Line, PCS/KG, roll weight, core/tare and allowance"},
-    ], hide_index=True, width="stretch")
-    st.markdown("### Key reliability decisions")
-    st.markdown("""
-    - Daily Item IDs and master codes belong to different numbering systems, so the app matches an **exact cleaned Item Name**.
-    - No fuzzy match is automatically accepted.
-    - Missing machine, conversion or weight values block the download.
-    - Contractor and shift quantities remain separate until the final totals.
-    - The generated workbook includes a validation sheet for audit.
-    """)
+    source_a = classifier_a_file or shift_a_file
+    source_b = classifier_b_file or shift_b_file
+    if source_a is None or source_b is None:
+        st.info("Upload both Shift A and Shift B workbooks to search contractor data.")
+    else:
+        try:
+            with st.spinner("Reading contractor sections from both workbooks…"):
+                classifier_shifts = [
+                    read_classifier_shift(source_a.getvalue(), "A"),
+                    read_classifier_shift(source_b.getvalue(), "B"),
+                ]
+        except Exception as exc:
+            st.error(f"The classifier could not read the workbooks: {exc}")
+        else:
+            contractor_names = sorted(set().union(*(shift.contractors for shift in classifier_shifts)), key=str.casefold)
+            if not contractor_names:
+                st.warning("No contractor sections were found in the uploaded workbooks.")
+            else:
+                selected_contractor = st.selectbox("Select contractor", contractor_names)
+                sections = combined_contractor_sections(classifier_shifts, selected_contractor)
+                total_rows = sum(len(rows) for rows in sections.values())
+                with st.container(border=True):
+                    st.caption("CONTRACTOR REPORT OVERVIEW")
+                    st.badge(selected_contractor, color="yellow", icon=":material/person:")
+                    st.metric("Total source rows", f"{total_rows:,}")
+                    for section_name, rows in sections.items():
+                        shift_a_rows = int((rows["Shift"] == "Shift A").sum())
+                        shift_b_rows = int((rows["Shift"] == "Shift B").sum())
+                        st.markdown(
+                            f"**{section_name}** · {shift_a_rows} Shift A + "
+                            f"{shift_b_rows} Shift B = {len(rows)} rows"
+                        )
+                    st.caption(
+                        "Download includes one worksheet with all five types and both shifts. "
+                        "In Excel, use the + / − controls above the columns to collapse production or material details."
+                    )
+
+                safe_contractor = re.sub(r"[^A-Za-z0-9_-]+", "_", selected_contractor).strip("_")
+                st.download_button(
+                    "Download contractor classifier report",
+                    data=create_classifier_excel_report(classifier_shifts, selected_contractor),
+                    file_name=f"{safe_contractor}_Contractor_Classifier.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    type="primary",
+                    width="stretch",
+                )
