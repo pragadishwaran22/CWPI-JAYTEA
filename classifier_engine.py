@@ -196,6 +196,15 @@ def combined_contractor_sections(
     return combined
 
 
+def list_classifier_contractors(shifts: list[ClassifierShift]) -> list[str]:
+    """List each contractor once, even if the shifts use different casing."""
+    names: dict[str, str] = {}
+    for shift in shifts:
+        for name in sorted(shift.contractors, key=lambda value: (value.casefold(), value)):
+            names.setdefault(name.casefold(), name)
+    return sorted(names.values(), key=str.casefold)
+
+
 def _classifier_export_rows(
     shifts: list[ClassifierShift], contractor: str, search: str = ""
 ):
@@ -208,11 +217,8 @@ def _classifier_export_rows(
             yield tuple(values[header] for header in EXPORT_COLUMNS)
 
 
-def create_classifier_excel_report(shifts: list[ClassifierShift], contractor: str, search: str = "") -> bytes:
-    """Download one filterable sheet with independent production/material outlines."""
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "Contractor classifier"
+def _write_classifier_sheet(sheet, shifts: list[ClassifierShift], contractor: str, search: str = "") -> None:
+    """Keep the existing classifier layout on any worksheet."""
     last_column = len(EXPORT_COLUMNS) + 1  # Narrow K divider keeps the two outlines separate.
     sheet.cell(1, 1, "CONTRACTOR")
     sheet.merge_cells(start_row=1, start_column=2, end_row=1, end_column=last_column)
@@ -251,6 +257,45 @@ def create_classifier_excel_report(shifts: list[ClassifierShift], contractor: st
     sheet.freeze_panes = "D5"
     sheet.auto_filter.ref = f"A4:{get_column_letter(last_column)}{max(4, sheet.max_row)}"
     sheet.auto_filter.filterColumn.append(FilterColumn(colId=10, hiddenButton=True))
+
+
+def _contractor_sheet_title(contractor: str, used: set[str]) -> str:
+    """Make an Excel-safe, unique sheet name without changing its gold header."""
+    base = re.sub(r"[\\/*?:\[\]]", "_", contractor).strip().strip("'") or "Contractor"
+    if base.casefold() == "history":
+        base = "_History"
+    candidate = base[:31]
+    suffix = 2
+    while candidate.casefold() in used:
+        ending = f" ({suffix})"
+        candidate = f"{base[:31 - len(ending)]}{ending}"
+        suffix += 1
+    used.add(candidate.casefold())
+    return candidate
+
+
+def create_classifier_excel_report(shifts: list[ClassifierShift], contractor: str, search: str = "") -> bytes:
+    """Keep the original single-contractor export available to callers."""
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Contractor classifier"
+    _write_classifier_sheet(sheet, shifts, contractor, search)
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
+def create_all_classifier_excel_report(shifts: list[ClassifierShift]) -> bytes:
+    """Download every contractor in one workbook, one formatted sheet each."""
+    contractors = list_classifier_contractors(shifts)
+    if not contractors:
+        raise ValueError("No contractors were found in the shift workbooks.")
+    workbook = Workbook()
+    used_titles: set[str] = set()
+    for index, contractor in enumerate(contractors):
+        sheet = workbook.active if index == 0 else workbook.create_sheet()
+        sheet.title = _contractor_sheet_title(contractor, used_titles)
+        _write_classifier_sheet(sheet, shifts, contractor)
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
