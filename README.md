@@ -2,7 +2,7 @@
 
 This Streamlit application reads the daily Shift A and Shift B Auto Material Slip workbooks, matches each exact cleaned Printing Item Name to the permanent master, calculates PCS and KG by contractor and shift, validates the data, and creates an Excel report.
 
-The Generate report tab includes a short explanation of the workflow. The Contractor-wise classifier report tab shows the original shift data by contractor.
+The Printing issue report tab includes a short explanation of the workflow. The Overall classifier report tab shows the original shift data by contractor.
 
 ## Run on Windows
 
@@ -66,11 +66,11 @@ Daily Auto Material Slip Item IDs and permanent-master item codes come from diff
 
 Only approved name pairs are readable through the app's publishable key. This is suitable only if those approved pairs may be read by anyone with that public key; use authenticated access instead if the mapping is confidential. The app reads from Supabase but never writes workbook contents or mapping rows to it. Mapping reads are cached for 15 minutes; wait or restart the app after edits if you need an immediate refresh.
 
-## Contractor-wise classifier report
+## Overall classifier report
 
-Open **Contractor-wise classifier report** and upload the Shift A and Shift B workbooks. If those files are already selected in **Generate report**, the classifier uses them automatically. The printing master is not needed for this view.
+Open **Overall classifier report** and upload the Shift A and Shift B workbooks. If those files are already selected in **Printing issue report**, the classifier uses them automatically. The printing master is not needed for this view.
 
-Select a contractor to see a boxed overview of row counts for both shifts; there are no table previews or row-search control. Combined generic material is excluded. Quantities and other source values are exported without conversion or aggregation. **Download contractor classifier report** saves one filterable worksheet containing all five types and both shifts. Type, Shift, and Date columns identify each row, and the contractor name is highlighted in a gold header at the top. Excel's outline controls let you manually collapse the production-plan columns or the material columns independently; filtering Type does not collapse columns automatically.
+The app shows a boxed overview of all contractors and source-row counts, with no contractor selector, table preview, or row-search control. Combined generic material is excluded. Quantities and other source values are exported without conversion or aggregation. **Download overall classifier report** saves one workbook with a separate filterable worksheet for every contractor. Each sheet contains all five types and both shifts; Type, Shift, and Date columns identify each row, and the contractor name is highlighted in a gold header. Excel's outline controls let you manually collapse the production-plan columns or the material columns independently; filtering Type does not collapse columns automatically.
 
 ## Calculation
 
