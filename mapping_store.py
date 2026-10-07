@@ -1,4 +1,4 @@
-"""Read approved M4-to-MJP name pairs from Supabase's REST API."""
+"""Read M4-to-MJP name pairs and their approval state from Supabase."""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ import pandas as pd
 PAGE_SIZE = 500
 
 
-def fetch_approved_name_mappings(project_url: str, publishable_key: str) -> pd.DataFrame:
-    """Fetch every approved pair; never infer a match from an ID or partial name."""
+def fetch_name_mappings(project_url: str, publishable_key: str) -> pd.DataFrame:
+    """Fetch every pair so unique aliases and ambiguous aliases can be distinguished."""
     parsed = urlparse(project_url)
     if (parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password
             or parsed.path.rstrip("/") not in ("", "/rest/v1") or parsed.query or parsed.fragment):
@@ -25,7 +25,7 @@ def fetch_approved_name_mappings(project_url: str, publishable_key: str) -> pd.D
     rows: list[dict[str, str]] = []
     project_base = urlunparse((parsed.scheme, parsed.netloc, "", "", "", ""))
     endpoint = project_base + "/rest/v1/printing_item_name_mapping"
-    query = urlencode({"select": "m4_item_name,mjp_item_name", "approved": "eq.true", "order": "m4_item_name,mjp_item_name"})
+    query = urlencode({"select": "m4_item_name,mjp_item_name,approved", "order": "m4_item_name,mjp_item_name"})
     while True:
         start = len(rows)
         request = Request(
@@ -43,7 +43,7 @@ def fetch_approved_name_mappings(project_url: str, publishable_key: str) -> pd.D
                 page = json.load(response)
                 content_range = response.headers.get("Content-Range", "")
         except (HTTPError, URLError, TimeoutError) as exc:
-            raise RuntimeError("Could not read the approved name mappings from Supabase. Check the URL, key, table and read policy.") from exc
+            raise RuntimeError("Could not read the name mappings from Supabase. Check the URL, key, table and read policy.") from exc
         if not isinstance(page, list):
             raise RuntimeError("Supabase returned an unexpected name-mapping response.")
         if not page:
@@ -54,4 +54,4 @@ def fetch_approved_name_mappings(project_url: str, publishable_key: str) -> pd.D
             break
         if not content_range and len(page) < PAGE_SIZE:
             break
-    return pd.DataFrame(rows, columns=["m4_item_name", "mjp_item_name"])
+    return pd.DataFrame(rows, columns=["m4_item_name", "mjp_item_name", "approved"])

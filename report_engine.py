@@ -221,15 +221,20 @@ def _resolve_item_names(
 ) -> tuple[dict[str, str], set[str]]:
     """Resolve source names to master-name keys without consulting either ID system."""
     master_keys = set(master["Item Name Key"])
-    candidates: dict[str, set[str]] = {}
+    candidates: dict[str, dict[str, bool]] = {}
     if name_mappings is not None:
         required = {"m4_item_name", "mjp_item_name"}
         if not required.issubset(name_mappings.columns):
             raise ValueError("Name mapping data must contain m4_item_name and mjp_item_name.")
-        for source, target in name_mappings[["m4_item_name", "mjp_item_name"]].itertuples(index=False, name=None):
+        has_approval = "approved" in name_mappings.columns
+        columns = ["m4_item_name", "mjp_item_name"] + (["approved"] if has_approval else [])
+        for row in name_mappings[columns].itertuples(index=False, name=None):
+            source, target = row[:2]
             source_key, target_key = _key(source), _key(target)
             if source_key and target_key:
-                candidates.setdefault(source_key, set()).add(target_key)
+                approved = bool(row[2]) if has_approval and pd.notna(row[2]) else False
+                targets = candidates.setdefault(source_key, {})
+                targets[target_key] = targets.get(target_key, False) or approved
 
     source_keys = {
         _key(name)
@@ -240,10 +245,16 @@ def _resolve_item_names(
     for source_key in source_keys:
         if source_key in master_keys:
             resolved[source_key] = source_key
-        elif len(candidates.get(source_key, ())) == 1:
-            resolved[source_key] = next(iter(candidates[source_key]))
-        elif len(candidates.get(source_key, ())) > 1:
-            ambiguous.add(source_key)
+        else:
+            targets = candidates.get(source_key, {})
+            if len(targets) == 1:
+                resolved[source_key] = next(iter(targets))
+            elif len(targets) > 1:
+                approved_targets = [target for target, approved in targets.items() if approved]
+                if len(approved_targets) == 1:
+                    resolved[source_key] = approved_targets[0]
+                else:
+                    ambiguous.add(source_key)
     return resolved, ambiguous
 
 
@@ -276,7 +287,7 @@ def build_report(master_source: FileInput, shift_a_source: FileInput, shift_b_so
     master_keys = set(master["Item Name Key"])
     mapped_names = {source: target for source, target in resolved_names.items() if source != target and target in master_keys}
     if mapped_names:
-        warnings.append(f"{len(mapped_names)} distinct source Item Names were matched to the master through approved M4/MJP name mappings.")
+        warnings.append(f"{len(mapped_names)} distinct source Item Names were matched to the master through M4/MJP name mappings.")
     a = _prepare_shift(shift_a, "A", resolved_names)
     b = _prepare_shift(shift_b, "B", resolved_names)
     report = a.merge(b, on=["Contractor Name", "Item Name Key"], how="outer")
@@ -292,7 +303,7 @@ def build_report(master_source: FileInput, shift_a_source: FileInput, shift_b_so
     }
     active_ambiguous = sorted(ambiguous_names & active_source_names)
     if active_ambiguous:
-        errors.append("Ambiguous M4/MJP Item Name mappings (choose one approved target): " + ", ".join(active_ambiguous[:30]))
+        errors.append("Ambiguous M4/MJP Item Name mappings (approve exactly one target for each name in Supabase): " + ", ".join(active_ambiguous[:30]))
     report = report.merge(master, on="Item Name Key", how="left", validate="many_to_one")
 
     missing_master = report[report["Printing Item Name"].isna()]["Item Name Key"].unique().tolist()

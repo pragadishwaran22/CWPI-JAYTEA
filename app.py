@@ -1,4 +1,5 @@
 from datetime import date
+from hashlib import sha256
 from pathlib import Path
 
 import streamlit as st
@@ -15,8 +16,9 @@ from report_engine import (
     build_report,
     create_excel_report,
 )
+from loading_overlay import printing_overlay
 from version import APP_VERSION
-from mapping_store import fetch_approved_name_mappings
+from mapping_store import fetch_name_mappings
 
 
 LOGO_PATH = Path(__file__).parent / "assets" / "glossy_gold_jay_oval_emblem.png"
@@ -29,7 +31,7 @@ def read_classifier_shift(workbook_bytes: bytes, shift: str):
 
 @st.cache_data(ttl="15m", max_entries=4, show_spinner=False)
 def read_name_mappings(project_url: str, publishable_key: str):
-    return fetch_approved_name_mappings(project_url, publishable_key)
+    return fetch_name_mappings(project_url, publishable_key)
 
 
 def supabase_mapping_config() -> tuple[str, str] | None:
@@ -309,7 +311,7 @@ with st.sidebar:
 with generate_tab:
     render_hero("generate")
     st.subheader("Upload the three source workbooks")
-    st.caption("The daily workbooks must contain PRINTING MATL REQ. Items match the master by cleaned name; an approved M4/MJP name mapping can resolve a different name. Item IDs are not used for matching.")
+    st.caption("The daily workbooks must contain PRINTING MATL REQ. Items match the master by cleaned name first; a single M4/MJP name mapping can resolve a different name. Names with multiple mappings need one approved choice in Supabase. Item IDs are not used for matching.")
     master_file = st.file_uploader("Permanent printing master", type=["xlsx"], key="master", help="Contains item name, machine line, PCS/KG, roll weight and core/tare weight.")
     col_a, col_b = st.columns(2)
     with col_a:
@@ -323,14 +325,14 @@ with generate_tab:
         if ready_count < 3:
             st.error("Select the master, Shift A and Shift B workbooks.")
         else:
-            with st.spinner("Reading sections, matching items and validating calculations…"):
+            with printing_overlay("Reading workbooks and validating the printing issue report"):
                 try:
                     mapping_config = supabase_mapping_config()
                     mappings = read_name_mappings(*mapping_config) if mapping_config else None
                     result = build_report(master_file, shift_a_file, shift_b_file, default_allowance, mappings)
                     st.session_state["result"] = result
                     st.session_state["mapping_status"] = (
-                        f"{len(mappings):,} approved name pairs loaded from Supabase."
+                        f"{len(mappings):,} name pairs loaded from Supabase. Single-option mappings are automatic; multiple-option mappings need one approved choice."
                         if mappings is not None else
                         "Supabase is not configured; only direct master-name matches are available."
                     )
@@ -346,7 +348,7 @@ with generate_tab:
         st.markdown("#### How this report works")
         st.write(
             "Upload the printing master and both shift workbooks. The app matches printing items "
-            "to the master directly or through an approved M4/MJP name mapping, calculates the issue weight for each shift, and checks for missing details. "
+            "to the master directly or through a single M4/MJP name mapping. If several mappings exist, one must be approved. The app then calculates the issue weight for each shift and checks for missing details. "
             "Once the checks pass, you can preview and download the report below."
         )
 
@@ -435,44 +437,80 @@ with classifier_tab:
 
     source_a = classifier_a_file or shift_a_file
     source_b = classifier_b_file or shift_b_file
-    if source_a is None or source_b is None:
+    classifier_ready = source_a is not None and source_b is not None
+    if not classifier_ready:
         st.info("Upload both Shift A and Shift B workbooks to create the contractor workbook.")
+    generate_classifier = st.button(
+        "Generate overall classifier report",
+        type="primary",
+        width="stretch",
+        disabled=not classifier_ready,
+        key="generate_classifier_report",
+    )
+    if classifier_ready:
+        source_fingerprint = (
+            sha256(source_a.getvalue()).hexdigest(),
+            sha256(source_b.getvalue()).hexdigest(),
+        )
+        classifier_result = st.session_state.get("classifier_result")
+        if classifier_result and classifier_result["source_fingerprint"] != source_fingerprint:
+            st.session_state.pop("classifier_result", None)
+            classifier_result = None
     else:
+        classifier_result = None
+
+    if generate_classifier:
         try:
-            with st.spinner("Reading contractor sections from both workbooks…"):
+            with printing_overlay("Preparing every contractor worksheet from both shifts"):
                 classifier_shifts = [
                     read_classifier_shift(source_a.getvalue(), "A"),
                     read_classifier_shift(source_b.getvalue(), "B"),
                 ]
-        except Exception as exc:
-            st.error(f"The classifier could not read the workbooks: {exc}")
-        else:
-            contractor_names = list_classifier_contractors(classifier_shifts)
-            if not contractor_names:
-                st.warning("No contractor sections were found in the uploaded workbooks.")
-            else:
+                contractor_names = list_classifier_contractors(classifier_shifts)
+                classifier_excel = (
+                    create_all_classifier_excel_report(classifier_shifts)
+                    if contractor_names else None
+                )
                 section_counts = {
                     section_name: sum(len(shift.sections[section_name]) for shift in classifier_shifts)
                     for section_name in classifier_shifts[0].sections
                 }
-                with st.container(border=True):
-                    st.caption("WORKBOOK OVERVIEW")
-                    st.metric("Contractor worksheets", f"{len(contractor_names):,}")
-                    st.metric("Total source rows", f"{sum(section_counts.values()):,}")
-                    for section_name, count in section_counts.items():
-                        st.markdown(
-                            f"**{section_name}** · {count:,} rows across Shift A and Shift B"
-                        )
-                    st.caption(
-                        "Download includes one worksheet per contractor, each with all five types and both shifts. "
-                        "In Excel, use the + / − controls above the columns to collapse production or material details."
-                    )
+                classifier_result = {
+                    "source_fingerprint": source_fingerprint,
+                    "contractor_names": contractor_names,
+                    "section_counts": section_counts,
+                    "excel": classifier_excel,
+                }
+                st.session_state["classifier_result"] = classifier_result
+        except Exception as exc:
+            st.session_state.pop("classifier_result", None)
+            classifier_result = None
+            st.error(f"The classifier report could not be prepared: {exc}")
 
-                st.download_button(
-                    "Download overall classifier report",
-                    data=create_all_classifier_excel_report(classifier_shifts),
-                    file_name="Overall_Contractor_Classifier.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    type="primary",
-                    width="stretch",
+    if classifier_result:
+        contractor_names = classifier_result["contractor_names"]
+        if not contractor_names:
+            st.warning("No contractor sections were found in the uploaded workbooks.")
+        else:
+            section_counts = classifier_result["section_counts"]
+            with st.container(border=True):
+                st.caption("WORKBOOK OVERVIEW")
+                st.metric("Contractor worksheets", f"{len(contractor_names):,}")
+                st.metric("Total source rows", f"{sum(section_counts.values()):,}")
+                for section_name, count in section_counts.items():
+                    st.markdown(
+                        f"**{section_name}** · {count:,} rows across Shift A and Shift B"
+                    )
+                st.caption(
+                    "Download includes one worksheet per contractor, each with all five types and both shifts. "
+                    "In Excel, use the + / − controls above the columns to collapse production or material details."
                 )
+
+            st.download_button(
+                "Download overall classifier report",
+                data=classifier_result["excel"],
+                file_name="Overall_Contractor_Classifier.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+                width="stretch",
+            )

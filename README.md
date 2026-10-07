@@ -48,12 +48,12 @@ Choose the report date and allowance, then click **Validate and generate report*
 
 The summary separates requested KG within each shift by Printing Item Name prefix: names beginning with `TAG` contribute to that shift's **Total requested TAG (KG)**, and names beginning with `ENV` contribute to that shift's **Total requested ENV (KG)**.
 
-Daily Auto Material Slip Item IDs and permanent-master item codes come from different numbering systems. Matching uses only normalized item names, never IDs or fuzzy similarity. An exact name in the master wins. Otherwise, an approved M4-name-to-MJP-name pair from Supabase can resolve it. Missing, ambiguous, or non-master targets block the download. Both ID systems remain in the output for auditing, but do not drive matching.
+Daily Auto Material Slip Item IDs and permanent-master item codes come from different numbering systems. Matching uses only normalized item names, never IDs or fuzzy similarity. An exact name in the master wins. Otherwise, a single M4-name-to-MJP-name pair from Supabase is used automatically. If an M4 name has multiple MJP targets, exactly one pair must be approved; otherwise the report is blocked. Missing or non-master targets also block the download. Both ID systems remain in the output for auditing, but do not drive matching.
 
 ## M4/MJP name mapping setup
 
 1. Run [the table setup SQL](supabase/printing_item_name_mapping.sql) in your Supabase project's SQL editor.
-2. Run `python prepare_mapping_import.py "path/to/MJPvsM4ItemMappingDtls.xls" "outputs/printing_name_mapping_import.csv"`. Import the resulting CSV into the Supabase table. It contains only the two names and an `approved` flag—no IDs. Pairs with exactly one target per M4 name are pre-approved; all source names with multiple possible targets stay unapproved for review. Approve exactly one intended target per ambiguous M4 name. The target name must exist in the printing master.
+2. Run `python prepare_mapping_import.py "path/to/MJPvsM4ItemMappingDtls.xls" "outputs/printing_name_mapping_import.csv"`. Import the resulting CSV into the Supabase table. It contains only the two names and an `approved` flag—no IDs. Single-target names work automatically regardless of the flag. For each M4 name with multiple possible targets, approve exactly one intended pair. The selected target name must exist in the printing master.
 3. Add this to a local `.streamlit/secrets.toml` file (already gitignored), and enter the same values in Streamlit Cloud's app secrets for deployment:
 
    ```toml
@@ -64,7 +64,7 @@ Daily Auto Material Slip Item IDs and permanent-master item codes come from diff
 
 4. Restart the local Streamlit server after adding the secrets file. Generate a report and check the displayed mapping status and validation messages.
 
-Only approved name pairs are readable through the app's publishable key. This is suitable only if those approved pairs may be read by anyone with that public key; use authenticated access instead if the mapping is confidential. The app reads from Supabase but never writes workbook contents or mapping rows to it. Mapping reads are cached for 15 minutes; wait or restart the app after edits if you need an immediate refresh.
+All name pairs and approval flags are readable through the app's publishable key so it can detect ambiguous names. This is suitable only if these names may be read by anyone with that public key; use authenticated access instead if the mapping is confidential. The app reads from Supabase but never writes workbook contents or mapping rows to it. Mapping reads are cached for 15 minutes; wait or restart the app after edits if you need an immediate refresh. If the table already exists, rerun the setup SQL to replace its old approved-only read policy before using this version.
 
 ## Overall classifier report
 

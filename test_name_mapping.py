@@ -45,6 +45,32 @@ class NameMappingTests(unittest.TestCase):
         self.assertNotIn("ENV M4 NAME", resolved)
         self.assertEqual(ambiguous, {"ENV M4 NAME"})
 
+    def test_single_unapproved_mapping_is_used_automatically(self):
+        names = pd.DataFrame([{
+            "m4_item_name": "ENV M4 NAME", "mjp_item_name": "ENV MASTER NAME", "approved": False,
+        }])
+        resolved, ambiguous = _resolve_item_names((shift("A", "ENV M4 NAME"), shift("B", "ENV M4 NAME")), master(), names)
+        self.assertEqual(resolved["ENV M4 NAME"], "ENV MASTER NAME")
+        self.assertFalse(ambiguous)
+
+    def test_one_approved_target_resolves_ambiguous_name(self):
+        names = pd.DataFrame([
+            {"m4_item_name": "ENV M4 NAME", "mjp_item_name": "ENV MASTER NAME", "approved": True},
+            {"m4_item_name": "ENV M4 NAME", "mjp_item_name": "OTHER NAME", "approved": False},
+        ])
+        resolved, ambiguous = _resolve_item_names((shift("A", "ENV M4 NAME"), shift("B", "ENV M4 NAME")), master(), names)
+        self.assertEqual(resolved["ENV M4 NAME"], "ENV MASTER NAME")
+        self.assertFalse(ambiguous)
+
+    def test_multiple_approved_targets_remain_ambiguous(self):
+        names = pd.DataFrame([
+            {"m4_item_name": "ENV M4 NAME", "mjp_item_name": "ENV MASTER NAME", "approved": True},
+            {"m4_item_name": "ENV M4 NAME", "mjp_item_name": "OTHER NAME", "approved": True},
+        ])
+        resolved, ambiguous = _resolve_item_names((shift("A", "ENV M4 NAME"), shift("B", "ENV M4 NAME")), master(), names)
+        self.assertNotIn("ENV M4 NAME", resolved)
+        self.assertEqual(ambiguous, {"ENV M4 NAME"})
+
     def test_alias_merges_shifts_before_calculation(self):
         names = pd.DataFrame([{"m4_item_name": "env m4   name", "mjp_item_name": "ENV MASTER NAME"}])
         with patch("report_engine.read_master", return_value=(master(), [], [])), patch(
