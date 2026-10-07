@@ -306,12 +306,12 @@ with st.sidebar:
         st.markdown("**Calculation source**")
         st.caption("Request Qty → Item master → Machine weights → KG → allowance")
         st.markdown("**Safety rule**")
-        st.caption("Missing or conflicting mappings block the Excel download.")
+        st.caption("Incomplete reports cannot be downloaded.")
 
 with generate_tab:
     render_hero("generate")
     st.subheader("Upload the three source workbooks")
-    st.caption("The daily workbooks must contain PRINTING MATL REQ. Items match the master by cleaned name first; a single M4/MJP name mapping can resolve a different name. Names with multiple mappings need one approved choice in Supabase. Item IDs are not used for matching.")
+    st.caption("1. Upload the printing master and both shift workbooks. 2. Generate the report. 3. Download it.")
     master_file = st.file_uploader("Permanent printing master", type=["xlsx"], key="master", help="Contains item name, machine line, PCS/KG, roll weight and core/tare weight.")
     col_a, col_b = st.columns(2)
     with col_a:
@@ -331,26 +331,9 @@ with generate_tab:
                     mappings = read_name_mappings(*mapping_config) if mapping_config else None
                     result = build_report(master_file, shift_a_file, shift_b_file, default_allowance, mappings)
                     st.session_state["result"] = result
-                    st.session_state["mapping_status"] = (
-                        f"{len(mappings):,} name pairs loaded from Supabase. Single-option mappings are automatic; multiple-option mappings need one approved choice."
-                        if mappings is not None else
-                        "Supabase is not configured; only direct master-name matches are available."
-                    )
                 except Exception as exc:
                     st.session_state.pop("result", None)
-                    st.session_state.pop("mapping_status", None)
                     st.error(f"The report could not be generated: {exc}")
-
-    if st.session_state.get("mapping_status"):
-        st.info(st.session_state["mapping_status"])
-
-    with st.container(border=True):
-        st.markdown("#### How this report works")
-        st.write(
-            "Upload the printing master and both shift workbooks. The app matches printing items "
-            "to the master directly or through a single M4/MJP name mapping. If several mappings exist, one must be approved. The app then calculates the issue weight for each shift and checks for missing details. "
-            "Once the checks pass, you can preview and download the report below."
-        )
 
     result = st.session_state.get("result")
     if result:
@@ -360,7 +343,7 @@ with generate_tab:
             for error in result.errors:
                 st.write(f"• {error}")
         else:
-            st.success("Validation passed. Every report item has a usable master mapping.")
+            st.success("Report ready to download.")
         if result.warnings:
             with st.expander(f"Review {len(result.warnings)} warning(s)", expanded=True):
                 for warning in result.warnings:
@@ -423,12 +406,7 @@ with generate_tab:
 with classifier_tab:
     render_hero("classifier")
     st.subheader("Create the contractor workbook")
-    st.caption(
-        "Export every contractor's production plans and printing, packing, speciality tea and black tea "
-        "materials across both shifts. Quantities are shown as supplied in the workbooks; "
-        "printing issue report settings are not used here."
-    )
-    st.caption("Use the shift workbooks from Printing issue report, or upload a pair here. The printing master is not needed.")
+    st.caption("1. Upload the Shift A and Shift B workbooks. 2. Generate the report. 3. Download it.")
     classifier_upload_a, classifier_upload_b = st.columns(2)
     with classifier_upload_a:
         classifier_a_file = st.file_uploader("Shift A workbook for classifier", type=["xlsx"], key="classifier_shift_a")
